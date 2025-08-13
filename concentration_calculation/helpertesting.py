@@ -1,19 +1,11 @@
 import pandas as pd
 import docx
-import re
-re = re
-import sys
-sys.path.append(r"C:\Users\nhanp\Documents\GitHub\S-matrix")
-import CalcALL
-from openpyxl import load_workbook
-import os
+import re, os
 import sympy as sp
 import numpy as np
 from collections import Counter
 import copy
-import tkinter as tk 
-from tkinter import ttk, messagebox, filedialog
-from openpyxl import Workbook
+from scipy.stats import linregress
 #make a linked list to link all the data in the dataframe, this is to prevent out 
 # class data_frame_node:
 #     def __init__(self):
@@ -79,7 +71,13 @@ class Species_class:
 
         # Format: M*4.2*AA
         if len(parts) == 3:
-            comp, coeff, species = parts
+            for part in parts:
+                if self._is_number(part):
+                    coeff = part
+                elif part in self.known_compartments:
+                    comp = part
+                else:
+                    coeff = part
             if comp not in self.known_compartments:
                 raise ValueError(f"Unknown compartment '{comp}' in '{raw_term}'")
             if not self._is_number(coeff):
@@ -88,7 +86,7 @@ class Species_class:
 
         # Format: 4.2*AA or M*ATP
         elif len(parts) == 2:
-            print(f"working parts {parts}")
+            # print(f"working parts {parts}")
             match_part = None
             for part in parts:
                 buffer = re.match(r'^([A-Z]+)?(\d+(?:\.\d+)?)([A-Za-z]\w*)$', part)
@@ -188,8 +186,8 @@ class Species_class:
                 reactants = [r for r in reactants if r[0] not in dropped_species_set]
                 products = [p for p in products if p[0] not in dropped_species_set]
 
-            reactant_data = [(sp, label, '', coeff, rxn+1, comp) for sp, coeff, label, rxn, comp in reactants]
-            product_data = [(sp, label, 0.0, coeff, rxn+1, comp) for sp, coeff, label, rxn, comp in products]
+            reactant_data = [(sp, label, 0.0, float(coeff), rxn+1, comp) for sp, coeff, label, rxn, comp in reactants]
+            product_data = [(sp, label, 0.0, int(coeff), rxn+1, comp) for sp, coeff, label, rxn, comp in products]
 
             if not reactant_data and not product_data:
                 continue
@@ -202,8 +200,7 @@ class Species_class:
             }])], ignore_index=True)
 
 
-    def construct_concentration_data(self, output_path="concentration_requesting_data.xlsx",system_index=0):
-
+    def construct_concentration_data(self, dir:str=None,system_name:str = None, to_rewrite: bool = False):
         total_fraction = sum([v[1] for v in self.known_compartments.values()])
         if abs(total_fraction - 1.0) > 1e-6:
             raise ValueError(f"Compartment fractions do not sum to 1. Current sum: {total_fraction}")
@@ -218,46 +215,42 @@ class Species_class:
             "species": list(reactant_species),
             "initial cellular concentration recorded": ["" for _ in reactant_species]
         })
-        try: 
-            with pd.ExcelWriter(output_path, engine='openpyxl', mode='a',if_sheet_exists="replace") as writer:
-                df.to_excel(writer, index=False, sheet_name=f"Concentration Request data {system_index}")
-        except FileNotFoundError:
-            with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
-                df.to_excel(writer, index=False, sheet_name=f"Concentration Request data {system_index}")
-            print(f"[INFO] File {output_path} not found. Created a new file name {output_path}.")
-        return output_path
-    def request_concentration_data(self):
-        return
-        # root = tk.Tk()
-        # root.withdraw()
+        if to_rewrite:
+            output_path = dir
+            try: 
+                with pd.ExcelWriter(output_path, engine='openpyxl', mode='a',if_sheet_exists="replace") as writer:
+                    df.to_excel(writer, index=False, sheet_name=f"Concentration Request data {system_name}")
+            except FileNotFoundError:
+                with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
+                    df.to_excel(writer, index=False, sheet_name=f"Concentration Request data {system_name}")
+        return df
+    def appending_concentration_data(self, concentration_file_path:os.path = None, system_sheet_name: str = None):
+      
+        df_filled = pd.read_excel(concentration_file_path, sheet_name=f"{system_sheet_name}")
+        df_filled.columns = [col.strip().lower() for col in df_filled.columns]
+        species_concentration_map = {
+            str(row[0]).strip(): row[1]
+            for row in df_filled.itertuples(index=False)
+            if pd.notna(row[1])
+        }
 
-        # input("[WAITING] Press Enter after you have filled in the file...")
+        updated_reaction_data = []
+        for _, row in self.reaction_data.iterrows():
+            keq = row['Keq']
+            updated_reactants = []
+            for sp, label, conc, coeff, rxn_num, comp in row['Reactants']:
+                if sp in species_concentration_map:
+                    conc = float(species_concentration_map[sp])
+                updated_reactants.append((sp, label, float(conc), int(coeff), rxn_num, comp))
+            updated_reaction_data.append({
+                'Keq': float(keq),
+                'Reactants': updated_reactants,
+                'Products': row['Products'],
+                'Equilibrium Concentration': row['Equilibrium Concentration']
+            })
 
-        # df_filled = pd.read_excel(output_path, sheet_name=f"Concentration Request data {system_index}")
-        # df_filled.columns = [col.strip().lower() for col in df_filled.columns]
-        # species_concentration_map = {
-        #     str(row[0]).strip(): row[1]
-        #     for row in df_filled.itertuples(index=False)
-        #     if pd.notna(row[1])
-        # }
-
-        # updated_reaction_data = []
-        # for _, row in self.reaction_data.iterrows():
-        #     keq = row['Keq']
-        #     updated_reactants = []
-        #     for sp, label, conc, coeff, rxn_num, comp in row['Reactants']:
-        #         if sp in species_concentration_map:
-        #             conc = species_concentration_map[sp]
-        #         updated_reactants.append((sp, label, conc, coeff, rxn_num, comp))
-        #     updated_reaction_data.append({
-        #         'Keq': keq,
-        #         'Reactants': updated_reactants,
-        #         'Products': row['Products'],
-        #         'Equilibrium Concentration': row['Equilibrium Concentration']
-        #     })
-
-        # self.reaction_data = pd.DataFrame(updated_reaction_data)
-        # print("[DONE] Cellular concentrations assigned successfully.")
+        self.reaction_data = pd.DataFrame(updated_reaction_data)
+        print("[DONE] Cellular concentrations assigned successfully.")
 
     
 
@@ -333,37 +326,117 @@ class SpeciesMatrix(Species_class):
     def __init__(self, docx_path=None, equations_list_input=None, dropped_species_set=None,data_file_input=None):
         super().__init__(docx_path=docx_path, equations_list_input=equations_list_input)
     @staticmethod
-    def sum_species_concentration(reactants_list, products_list):
+    # def estimate_convergent_sum(data, p_estimate):
+    #     partial_sum = sum(data)
+    #     N = len(data)
+    #     if p_estimate > 1:
+    #         tail_estimate = (N**(1 - p_estimate)) / (p_estimate - 1)
+    #     else:
+    #         tail_estimate = np.inf  # Divergent
+    #     print(tail_estimate)
+    #     total_estimate = partial_sum + tail_estimate
+    #     return total_estimate, partial_sum, tail_estimate
+    @staticmethod
+    def check_convergence_full(data, zero_tol=1e-5, window=20, jitter_tol=1e-5):
+        """
+        Decide if a nonnegative sequence is converging to 0.
+
+        zero_tol   : absolute threshold for 'close to zero'
+        window     : only require monotonic nonincrease over the last `window` points
+        jitter_tol : allow tiny increases up to this tolerance
+        """
+        data = np.asarray(data, dtype=float)
+        n = np.arange(1, len(data) + 1)
+
+        # 1) Tail-wise monotonic nonincrease (with tolerance)
+        tail = data[-min(window, len(data)):]
+        diffs = np.diff(tail)
+        is_tail_nonincreasing = np.all(diffs <= jitter_tol)
+
+        # 2) Tends to zero (absolute check)
+        tends_to_zero = np.isclose(data[-1], 0.0, rtol=0.0, atol=zero_tol)
+
+        # 3) Ratio test on valid pairs only (avoid div-by-zero, negatives)
+        valid = (data[:-1] > 0) & np.isfinite(data[:-1]) & np.isfinite(data[1:])
+        if np.any(valid):
+            ratios = data[1:][valid] / data[:-1][valid]
+            avg_ratio = float(np.nanmean(ratios)) if ratios.size else np.inf
+        else:
+            avg_ratio = np.inf
+
+        # 4) log–log slope (mask zeros)
+        positive_mask = data > 0
+        if np.count_nonzero(positive_mask) >= 2:
+            slope, intercept, r_value, p_value, std_err = linregress(
+                np.log(n[positive_mask]), np.log(data[positive_mask])
+            )
+            p_estimate = -slope
+        else:
+            p_estimate = np.nan
+
+        # Verdict
+        if tends_to_zero and is_tail_nonincreasing:
+            verdict = "Convergent to 0 (tail monotone & below tol)"
+        elif tends_to_zero and (avg_ratio < 1 or (np.isfinite(p_estimate) and p_estimate > 1)):
+            verdict = "Likely convergent to 0 (tests support)"
+        else:
+            verdict = "Divergent or inconclusive"
+
+        return {
+            "is_decreasing": bool(is_tail_nonincreasing),
+            "tends_to_zero": bool(tends_to_zero),
+            "average_ratio": avg_ratio,
+            "p_estimate": p_estimate,
+            "verdict": verdict,
+        }
+   
+    def sum_species_concentration(self):
         """
         Sum all concentrations in a species list.
         Each item in species_list should be (species, concentration, label, coefficient).
         """
         reactant_sum = 0
-        for row in reactants_list:
-            reactant_sum += sum(iter[2] for iter in row)
+        for row in self.reaction_data.itertuples():
+            reactant_sum += sum(iter[2] for iter in row.Reactants)
         product_sum = 0
-        for row in products_list:
-            product_sum += sum(iter[2] for iter in row)
+        for row in self.reaction_data.itertuples():
+            product_sum += sum(iter[2] for iter in row.Products)
         return reactant_sum + product_sum
 
-    def calculate_equilibrium(self):
-        def updating_species(overlapping_list, index, data_to_update, column_name):
+    def calculate_equilibrium(self, system_compartment,global_concentration:dict = None):
+        if global_concentration == None:
+            raise ValueError("global concentration is not defined")
+        
+        def limiting_compartment_determinator(self,species_row,system_compartment:str = None):
+            list_of_compartment_ratio = [self.known_compartments[comp][1] for specimen, label, conc, coeff, rxn_num, comp in species_row]
+            print(list_of_compartment_ratio)
+            minimum_ratio = min(list_of_compartment_ratio)
+            print(minimum_ratio)
+            smallest_compartment = [val for val in self.known_compartments if self.known_compartments[val][1] == minimum_ratio]
+            return smallest_compartment
+        def updating_species_concentration(self, species_row,delta_x, species_type:int = 1,system_compartment:str = None,limiting_compartment:str=None,global_concentration:dict = None):
+            updated_species_list = []
+            for specimen, label, conc, coeff, rxn_num, comp in species_row:
+                global_concentration[specimen] -= delta_x*species_type*coeff*(self.known_compartments[limiting_compartment][1]/
+                                                                              self.known_compartments[system_compartment][1])*self.known_compartments[comp][1]
+
+                updated_species_list.append((specimen,label,global_concentration[specimen],coeff,rxn_num,comp))
+            return updated_species_list
+        def updating_overlapping_species(overlapping_list, index, data_to_update, column_name):
             for i in range (len(self.reaction_data.at[index,column_name])):
                 next_item = (self.reaction_data.at[index,column_name][i][0], self.reaction_data.at[index,column_name][i][1], self.reaction_data.at[index,column_name][i][4])
-                for i in range(len(overlapping_list)):
-                    if next_item in overlapping_list[i]:
+                for j in range(len(overlapping_list)):
+                    if next_item in overlapping_list[j]:
                         # Remove by value, not by index
                         buffer_conc = self.reaction_data.at[index,column_name][i][2]
                         if next_item in overlapping_list[i]:
                             overlapping_list[i].remove(next_item)
                             buffer_conc = sum(data_iter[2] for data_iter in data_to_update if data_iter[0] == self.reaction_data.at[index,column_name][i][0])
-                            print(buffer_conc)
-                            self.reaction_data.at[index,column_name][i] = (self.reaction_data.at[index,column_name][i][0], self.reaction_data.at[index,column_name][i][1], buffer_conc, self.reaction_data.at[index,column_name][i][3], self.reaction_data.at[index,column_name][i][4])
+                            self.reaction_data.at[index,column_name][i] = (self.reaction_data.at[index,column_name][i][0], self.reaction_data.at[index,column_name][i][1], buffer_conc, self.reaction_data.at[index,column_name][i][3], self.reaction_data.at[index,column_name][i][4],self.reaction_data.at[index,column_name][i][5])
             return overlapping_list
-
+        equilibrium_solution_array = []
         # Step 1: Build global concentration dictionary
         species_counter = Counter()
-        print(species_counter)
         for row in self.reaction_data['Reactants']:
             for species, label, conc, coeff, rxn_num,comp in row:
                 species_counter[species] += 1
@@ -386,16 +459,18 @@ class SpeciesMatrix(Species_class):
         for i in range(len(over_lapping_big_list)):
             over_lapping_big_list[i].sort(key=lambda x: x[2])
 
-        print(f"sorted overlapping species list: {over_lapping_big_list}")
         index = 0
-        while index < 10:
+        while True:
+            index+=1
             equilibrium_solutions_buffer_array = []
             buffer_overlapping_list = copy.deepcopy(over_lapping_big_list)
             for row in self.reaction_data.itertuples():
                 current_index = row.Index
                 x = sp.symbols("x")
+                
                 reactant_expr = sp.prod([pow((iter[2] - x), iter[3]) for iter in row.Reactants])
-                product_expr = sp.prod([pow((iter[2] + x), iter[3]) for iter in row.Products])
+                product_expr = sp.prod([pow((iter[2] + x), int(iter[3])) for iter in row.Products])
+                print(reactant_expr, product_expr)
                 poly_expr = sp.expand(row.Keq * reactant_expr - product_expr)
                 coeffs = sp.Poly(poly_expr, x).all_coeffs()
                 coeffs_numeric = [float(coef.evalf()) for coef in coeffs]
@@ -406,126 +481,61 @@ class SpeciesMatrix(Species_class):
                         sol_real = np.real(sol)
                         reactant_value = reactant_expr.subs(x, sol_real)
                         product_value = product_expr.subs(x, sol_real)
-                        if (reactant_value != 0 and all((val[2] - sol_real * val[3]) >= 0 for val in row.Reactants)) and (product_value != 0 and all((val[2] + sol_real * val[3]) >= 0 for val in row.Products)):
+                        if (all((val[2] - sol_real * val[3]) >= 0 for val in row.Reactants)) and (all((val[2] + sol_real * val[3]) >= 0 for val in row.Products)):
                             valid_solutions.append(sol_real)
                 equilibrium_solutions_buffer_array.extend(valid_solutions)
                 delta = valid_solutions[0] if valid_solutions else 0
+                limiting_compartment_of_reaction = limiting_compartment_determinator(self=self, species_row= row.Reactants + row.Products, system_compartment = system_compartment)[0]
 
-                updated_reactants = [(specimen, label, conc - delta*coeff, coeff, rxn_num, comp) for specimen, label, conc, coeff, rxn_num, comp in row.Reactants]
-                updated_products = [(specimen, label, conc + delta*coeff, coeff, rxn_num, comp) for specimen, label, conc, coeff, rxn_num, comp in row.Products]
+                # print(limiting_compartment_of_reaction)
+                updated_reactants =  updating_species_concentration(self = self,species_row=row.Reactants,delta_x = delta,species_type = 1,system_compartment=system_compartment,limiting_compartment=limiting_compartment_of_reaction,global_concentration=global_concentration)
+                updated_products = updating_species_concentration(self = self, species_row = row.Products,delta_x= delta,species_type=-1, system_compartment=system_compartment,limiting_compartment=limiting_compartment_of_reaction,global_concentration=global_concentration)
                 complete_update_list = updated_reactants + updated_products
                 self.reaction_data.at[row.Index, 'Reactants'] = updated_reactants
                 self.reaction_data.at[row.Index, 'Products'] = updated_products
 
                 next_index = current_index + 1
                 if next_index in self.reaction_data.index:
-                    buffer_overlapping_list = updating_species(
+                    buffer_overlapping_list = updating_overlapping_species(
                         overlapping_list=buffer_overlapping_list,
                         index=next_index,
                         data_to_update=complete_update_list,
                         column_name="Reactants"
                     )
-                    buffer_overlapping_list = updating_species(
+                    buffer_overlapping_list = updating_overlapping_species(
                         overlapping_list=buffer_overlapping_list,
                         index=next_index,
                         data_to_update=complete_update_list,
                         column_name="Products"
                     )
                 else:
-                    buffer_overlapping_list = updating_species(
+                    buffer_overlapping_list = updating_overlapping_species(
                         overlapping_list=buffer_overlapping_list,
                         index=0,
                         data_to_update=complete_update_list,
                         column_name="Reactants"
                     )
-                    buffer_overlapping_list = updating_species(
+                    buffer_overlapping_list = updating_overlapping_species(
                         overlapping_list=buffer_overlapping_list,
                         index=0,
                         data_to_update=complete_update_list,
                         column_name="Products"
                     )
+        
             print(f"equilibrium_solutions_buffer_array: {equilibrium_solutions_buffer_array}")
+            equilibrium_solution_array.extend(equilibrium_solutions_buffer_array)
             if np.count_nonzero(equilibrium_solutions_buffer_array)!=0:
+                result = self.check_convergence_full(equilibrium_solution_array)
+                print(result)
+                if result["is_decreasing"] and result["tends_to_zero"]:
+                    print("equilibrium is reached")
+                    break
                 index += 1
                 continue
             else:
                 print("equilibrium is reached")
                 break
-        print(equilibrium_solutions_buffer_array)
-        self.get_species_dataframe(output_file="species_concentration_output.xlsx")
-class miscellaneous():
-    def __init__(self):
-        # one persistent root; keep it hidden unless you run a full GUI
-        self.root = tk.Tk()
-
-    def confirm(self, title="Confirm", label="Are you sure?"):
-        """Modal Yes/No dialog. Returns True for OK, False for Cancel."""
-        win = tk.Toplevel(self.root)
-        win.title(title)
-        win.resizable(False, False)
-
-        # message
-        ttk.Label(win, text=label, wraplength=420, justify="left").grid(
-            row=0, column=0, columnspan=2, padx=12, pady=12, sticky="w"
-        )
-
-        result = {"value": False}  # closure box
-
-        def on_ok(_evt=None):
-            result["value"] = True
-            win.destroy()
-
-        def on_cancel(_evt=None):
-            result["value"] = False
-            win.destroy()
-
-        # buttons
-        ttk.Button(win, text="Overwrite", command=on_ok).grid(row=1, column=0, padx=8, pady=(0, 12))
-        ttk.Button(win, text="Cancel", command=on_cancel).grid(row=1, column=1, padx=8, pady=(0, 12))
-
-        # keyboard shortcuts
-        win.bind("<Return>", on_ok)
-        win.bind("<KP_Enter>", on_ok)
-        win.bind("<Escape>", on_cancel)
-        win.protocol("WM_DELETE_WINDOW", on_cancel)
-
-        # make modal
-        win.transient(self.root)
-        win.grab_set()
-        win.update_idletasks()
-
-        # center
-        w, h = win.winfo_width(), win.winfo_height()
-        x = (win.winfo_screenwidth() - w) // 2
-        y = (win.winfo_screenheight() - h) // 3
-        win.geometry(f"+{x}+{y}")
-
-        # block until window closes
-        self.root.wait_window(win)
-        return result["value"]
-
-    def close(self):
-        """Call once when your app is really done with Tk."""
-        if self.root:
-            self.root.destroy()
-            self.root = None
-
-    # Clean up redundant pluses and spaces    
-    @staticmethod
-    def clean_equation(equation):
-        # Remove standalone numbers (not followed by letters)
-        equation = re.sub(r'(?<![A-Za-z])\b\d+\b(?![A-Za-z])', '', equation)
-        # Replace multiple pluses with a single plus
-        equation = re.sub(r'\++', '+', equation)
-        # Remove pluses before/after arrows (=, ⇌, <=>, <->)
-        equation = re.sub(r'\+\s*(=|⇌|<=>|<->)', r'\1', equation)
-        equation = re.sub(r'(=|⇌|<=>|<->)\s*\+', r'\1', equation)
-        # Remove pluses at the start/end
-        equation = re.sub(r'^\s*\+\s*', '', equation)
-        equation = re.sub(r'\s*\+\s*$', '', equation)
-        # Remove empty reactant or product sides (e.g., "+ ⇌" or "+ =")
-        equation = re.sub(r'(\s*[\=⇌<=><->]\s*)\+', r'\1', equation)
-        equation = re.sub(r'\+(\s*[\=⇌<=><->]\s*)', r'\1', equation)
-        # Remove extra spaces
-        equation = re.sub(r'\s+', ' ', equation).strip()
-        return equation
+        print(f"number of iteration: {index}")
+        print(equilibrium_solution_array)
+        print(self.sum_species_concentration())
+        self.export_species_template(output_file="species_concentration_output.xlsx")

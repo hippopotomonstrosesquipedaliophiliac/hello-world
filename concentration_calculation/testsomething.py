@@ -34,11 +34,11 @@ def check_convergence_full(data):
 
     # Final verdict
     if not is_decreasing or not tends_to_zero:
-        verdict = "Divergent: sequence not decreasing or tending to zero"
+        verdict = "Divergent, sequence not decreasing or tending to zero"
     elif ratio_test_convergent:
-        verdict = "Likely convergent: Ratio test satisfied"
+        verdict = "Likely convergent, Ratio test satisfied"
     elif p_series_convergent:
-        verdict = f"Likely convergent: behaves like 1/n^{p_estimate:.2f} with p > 1"
+        verdict = f"Likely convergent, behaves like 1/n^{p_estimate:.2f} with p > 1"
     else:
         verdict = "Divergent or inconclusive"
 
@@ -52,8 +52,6 @@ def check_convergence_full(data):
     }
 data = [1.0, 0.25, 0.1111, 0.0625, 0.04, 0.0277, 0.0204, 0.0156, 0.0123,1e-8]
 result = check_convergence_full(data)
-convergence_estimate=[ estimate_convergent_sum(data, result['p_estimate'])]
+convergence_estimate=[estimate_convergent_sum(data, result['p_estimate'])]
 for k, v in result.items():
     print(f"{k}: {v}")
-for est in convergence_estimate:
-    print(est)
