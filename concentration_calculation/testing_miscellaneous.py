@@ -244,17 +244,22 @@ class miscellaneous():
 
 def check_if_previous_data_frame_exist(folders_path : str = None):
     folders = Path(folders_path)
-    list_of_previous_name_from_file = []
+    results = []
     for item in folders.glob("*.xlsx"):
-        species_concentration_name_list = []
         if item.name.startswith("~$"):
-            continue
-        data_sheets_name = load_workbook(item, read_only=True).sheetnames  
-        for individual_sheet in data_sheets_name:
-            df_filled = pd.read_excel(item, sheet_name=f"{individual_sheet}")
-            species_concentration_name_list.extend([prev_spec_name for prev_spec_name in df_filled["species"]])        
-        list_of_previous_name_from_file.append({os.path.basename(item): sorted(species_concentration_name_list)})
-    return list_of_previous_name_from_file
+            continue  # ignore Excel lock/temp files
+        species_names = []
+
+        wb = load_workbook(item, read_only=True)
+        try:
+            for sheet in wb.sheetnames:
+                df = pd.read_excel(item, sheet_name=sheet)
+                species_names.extend(list(df["species"]))
+        finally:
+            wb.close()  # <-- IMPORTANT
+
+        results.append({os.path.basename(item): sorted(species_names)})
+    return results
 def edit_then_wait(path, visible=True, require_saved=True, timeout=None, poll=0.5):
     """Open `path` in Excel (COM), show it, and block until user closes it.
        If `require_saved` is True, ensure it’s saved before we accept closure."""

@@ -149,3 +149,60 @@ class CompartmentSystem:
                 + "\n".join(problems)
             )
         return True
+    # --- NEW in system_reaction_parser.py -- inside class CompartmentSystem ------
+    def solve_all_systems_iterative(self, max_iters: int = 500, zero_tol: float = 1e-5, window: int = 20):
+        """
+        Advance ALL systems in lockstep:
+        - each iter: gather per-system deltas (no global mutation),
+            sum them, apply once to the global pool, sync all systems,
+            record history, and test convergence from combined solutions.
+        Returns the final global concentration dict.
+        """
+        from collections import defaultdict
+        global_conc = self.snapshot_global_concentrations()
+        # clear previous histories
+        for _, info in self.systems.items():
+            sm = info["speciesMatrix"]
+            if hasattr(sm, "iteration_history"):
+                sm.iteration_history = {}
+
+        all_eq_solutions = []
+
+        for k in range(1, max_iters + 1):
+            total_delta = defaultdict(float)
+            eq_batch = []
+
+            # 1) get proposed deltas from each system (read-only global)
+            for sys_name, info in self.systems.items():
+                sm   = info["speciesMatrix"]
+                comp = info["compartment"]
+                dmap, eqs = sm.compute_deltas_once(comp, global_conc)
+                eq_batch.extend(eqs)
+                for sp, d in dmap.items():
+                    total_delta[sp] += d
+
+            # 2) apply combined deltas to global (no negatives)
+            for sp, d in total_delta.items():
+                global_conc[sp] = max(0.0, float(global_conc.get(sp, 0.0)) + float(d))
+
+            # 3) sync every system’s local tables with new global
+            for _, info in self.systems.items():
+                sm = info["speciesMatrix"]
+                sm.sync_from_global(global_conc)
+
+            # 4) record the iteration snapshot for plotting
+            for _, info in self.systems.items():
+                sm = info["speciesMatrix"]
+                if hasattr(sm, "_record_iteration"):
+                    sm._record_iteration(k, global_conc)
+
+            # 5) convergence check (reuse your helper on the aggregate sequence)
+            all_eq_solutions.extend(eq_batch)
+            if len(all_eq_solutions) >= max(window, 3):
+                # call any SpeciesMatrix's static method
+                any_sm = next(iter(self.systems.values()))["speciesMatrix"]
+                verdict = any_sm.check_convergence_full(all_eq_solutions, zero_tol=zero_tol, window=window)
+                if verdict.get("is_decreasing") and verdict.get("tends_to_zero"):
+                    break
+
+        return global_conc

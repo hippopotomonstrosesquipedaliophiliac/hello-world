@@ -109,7 +109,7 @@ def main():
     validate_chemical_reactions = compartment_manager.validate_local_participation()
     asser_chemical_reactions = compartment_manager.assert_local_participation()
     print(global_concentration)
- 
+
 # Unique species -> totals + per-compartment breakdown
     
     for system_name, system_info in compartment_manager.get_all_systems().items():
